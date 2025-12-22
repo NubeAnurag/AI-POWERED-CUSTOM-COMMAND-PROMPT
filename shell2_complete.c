@@ -116,39 +116,25 @@ int (*builtin_func[])(char **) = {
     &ripple_whoami
 };
 
-// Struct for curl response
-struct MemoryStruct {
-    char *memory;
-    size_t size;
-};
-
-// Function to handle memory allocation for curl response
-static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
-    size_t realsize = size * nmemb;
-    struct MemoryStruct *mem = (struct MemoryStruct *)userp;
-    
-    char *ptr = realloc(mem->memory, mem->size + realsize + 1);
-    if(!ptr) {
-        printf("Not enough memory (realloc returned NULL)\n");
-        return 0;
-    }
-    
-    mem->memory = ptr;
-    memcpy(&(mem->memory[mem->size]), contents, realsize);
-    mem->size += realsize;
-    mem->memory[mem->size] = 0;
-    
-    return realsize;
-}
-
 // Add these terminal control functions with better error handling and verification
 void enable_raw_mode() {
+    // Only enable raw mode if stdin is a terminal
+    if (!isatty(STDIN_FILENO)) {
+        return;
+    }
     struct termios raw;
-    tcgetattr(STDIN_FILENO, &raw);
-    // Disable terminal flags that might interfere
+    if (tcgetattr(STDIN_FILENO, &raw) == -1) {
+        // If we can't get terminal attributes, just return (not a terminal)
+        return;
+    }
+    // Disable ECHO so we can manually control what's displayed
+    // This gives us full control over backspace and special characters
     raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
-    raw.c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
-    raw.c_oflag &= ~(OPOST);
+    // Keep ICRNL to convert carriage return (Enter) to newline
+    raw.c_iflag &= ~(IXON | BRKINT | INPCK | ISTRIP);
+    raw.c_iflag |= ICRNL;  // Convert CR to NL
+    // Keep OPOST enabled for proper output formatting (newlines, etc.)
+    raw.c_oflag |= (OPOST | ONLCR);  // Enable output processing and NL to CR-NL mapping
     raw.c_cflag |= (CS8);
     raw.c_cc[VMIN] = 1; // Wait for at least one character
     raw.c_cc[VTIME] = 0;
@@ -156,12 +142,16 @@ void enable_raw_mode() {
 }
 
 void disable_raw_mode() {
+    // Only disable raw mode if stdin is a terminal
+    if (!isatty(STDIN_FILENO)) {
+        return;
+    }
     struct termios term;
     
     // Get current settings
     if (tcgetattr(STDIN_FILENO, &term) == -1) {
-        perror("tcgetattr");
-        exit(1);
+        // If we can't get terminal attributes, just return (not a terminal)
+        return;
     }
     
     // Restore original settings
@@ -170,18 +160,17 @@ void disable_raw_mode() {
     term.c_oflag |= (OPOST);
     
     // Apply the restored settings
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &term) == -1) {
-        perror("tcsetattr");
-        exit(1);
-    }
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &term);
 }
 
 
 // Add a function to check if we're in raw mode
 int is_raw_mode() {
+    if (!isatty(STDIN_FILENO)) {
+        return 0;
+    }
     struct termios term;
     if (tcgetattr(STDIN_FILENO, &term) == -1) {
-        perror("tcgetattr");
         return 0;
     }
     
@@ -679,7 +668,8 @@ struct Node* cur = NULL;
 
 char* strAppend(char* str1, char* str2)
 {
-	char* str3 = (char*)malloc(sizeof(char*)*(strlen(str1)+strlen(str2)));
+	char* str3 = (char*)malloc(sizeof(char)*(strlen(str1)+strlen(str2)+1));
+  if (!str3) return NULL;
   strcpy(str3, str1);
   strcat(str3, str2);
 	return str3;
@@ -687,33 +677,58 @@ char* strAppend(char* str1, char* str2)
 void add_to_hist(char **args){
   if(head==NULL){
     head = (struct Node *)malloc(sizeof(struct Node));
-      head->str = (char *)malloc(0x1000);
-  char *str1 = " ";
-  if (args[1] == NULL) 
-     strcpy(head->str,strAppend(args[0],str1));
-  else
-{  
-  strcpy(head->str,strAppend(args[0],str1));
-  strcpy(head->str, strAppend(head->str, args[1]));
-  }
-  head->next = NULL;
-  cur = head;
-  }
-else{
+    head->str = (char *)malloc(0x1000);
+    if (!head->str) return;
+    char *str1 = " ";
+    char *temp;
+    if (args[1] == NULL) {
+        temp = strAppend(args[0], str1);
+        if (temp) {
+            strcpy(head->str, temp);
+            free(temp);
+        }
+    } else {
+        temp = strAppend(args[0], str1);
+        if (temp) {
+            strcpy(head->str, temp);
+            free(temp);
+        }
+        temp = strAppend(head->str, args[1]);
+        if (temp) {
+            strcpy(head->str, temp);
+            free(temp);
+        }
+    }
+    head->next = NULL;
+    cur = head;
+  } else {
     struct Node *ptr = (struct Node *)malloc(sizeof(struct Node));
     cur->next = ptr;
     ptr->str = (char *)malloc(0x1000);
-      char *str1 = " ";
-  if (args[1] == NULL) 
-     strcpy(ptr->str,strAppend(args[0],str1));
-  else
-{  
-  strcpy(ptr->str,strAppend(args[0],str1));
-  strcpy(ptr->str, strAppend(ptr->str, args[1]));
-  }
+    if (!ptr->str) return;
+    char *str1 = " ";
+    char *temp;
+    if (args[1] == NULL) {
+        temp = strAppend(args[0], str1);
+        if (temp) {
+            strcpy(ptr->str, temp);
+            free(temp);
+        }
+    } else {
+        temp = strAppend(args[0], str1);
+        if (temp) {
+            strcpy(ptr->str, temp);
+            free(temp);
+        }
+        temp = strAppend(ptr->str, args[1]);
+        if (temp) {
+            strcpy(ptr->str, temp);
+            free(temp);
+        }
+    }
     ptr->next = NULL;
     cur = ptr;
-}
+  }
 }
 
 //creating a function to display history:
@@ -810,10 +825,11 @@ void ripple_loop(void) {
 
     do {
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
-            printf("\033[1;32m%s\033[0m > ", cwd);
+            printf("\033[1;95m┌─[\033[1;96m%s\033[1;95m]\033[0m\n", cwd);
+            printf("\033[1;95m└─▶\033[0m \033[1;92m");
             fflush(stdout);  // Ensure prompt is displayed immediately
         } else {
-            printf("> ");
+            printf("\033[1;95m└─▶\033[0m \033[1;92m");
             fflush(stdout);
         }
         
@@ -827,6 +843,9 @@ void ripple_loop(void) {
             continue;
         }
         status = ripple_execute(args);
+        
+        // Print newline after command execution for better visibility
+        printf("\n");
 
         free(line);
         free(args);
@@ -856,24 +875,83 @@ char *ripple_read_line(void) {
             } else {
                 continue; // Ignore spurious EOFs
             }
-        } else if (c == '\n') {
+        } else if (c == '\n' || c == '\r') {  // Handle both newline and carriage return
             buffer[position] = '\0';
+            printf("\n");  // Print newline after command input
             return buffer;
         } else if (c == '\t') {
             buffer[position] = '\0';
-            char *current_cmd = strdup(buffer);
-            suggest_command(current_cmd);
-            printf("\nripple> %s", buffer);
+            // If buffer contains spaces, suggest args for the first token (e.g., gcc flags).
+            // Otherwise, suggest/complete the command name.
+            char *last_space = strrchr(buffer, ' ');
+            if (last_space != NULL) {
+                // First token = command (up to first space)
+                char cmd[128];
+                size_t cmd_len = 0;
+                while (buffer[cmd_len] && buffer[cmd_len] != ' ' && buffer[cmd_len] != '\t' && cmd_len < sizeof(cmd) - 1) {
+                    cmd[cmd_len] = buffer[cmd_len];
+                    cmd_len++;
+                }
+                cmd[cmd_len] = '\0';
+
+                // Current arg token = after last space (may be empty if trailing space)
+                const char *arg_partial = last_space + 1;
+
+                printf("\n");
+                suggest_external_args(cmd, arg_partial);
+
+                // Try to autocomplete current arg token if it uniquely matches a known flag
+                char completed_arg[128];
+                int argc = complete_external_arg(cmd, arg_partial, completed_arg, sizeof(completed_arg));
+                if (argc == 1 && completed_arg[0] != '\0') {
+                    size_t prefix_len = (size_t)(arg_partial - buffer);
+                    if (prefix_len < (size_t)bufsize) {
+                        snprintf(buffer + prefix_len, (size_t)bufsize - prefix_len, "%s", completed_arg);
+                        position = (int)strlen(buffer);
+                    }
+                }
+            } else {
+                char *current_cmd = strdup(buffer);
+                suggest_command(current_cmd);
+                free(current_cmd);
+
+                // If this partial uniquely matches a built-in, autocomplete it in-place
+                char completed[128];
+                int comp = complete_builtin_command(buffer, completed, sizeof(completed));
+                if (comp == 1 && completed[0] != '\0') {
+                    snprintf(buffer, bufsize, "%s", completed);
+                    position = (int)strlen(buffer);
+                } else {
+                    // If no built-in match, try external command completion (PATH)
+                    int extc = complete_external_command(buffer, completed, sizeof(completed));
+                    if (extc == 1 && completed[0] != '\0') {
+                        snprintf(buffer, bufsize, "%s", completed);
+                        position = (int)strlen(buffer);
+                    }
+                }
+            }
+            // Redraw the normal prompt + current buffer
+            char cwd[1024];
+            if (getcwd(cwd, sizeof(cwd)) != NULL) {
+                printf("\033[1;95m┌─[\033[1;96m%s\033[1;95m]\033[0m\n", cwd);
+                printf("\033[1;95m└─▶\033[0m \033[1;92m%s\033[0m", buffer);
+            } else {
+                printf("\033[1;95m└─▶\033[0m \033[1;92m%s\033[0m", buffer);
+            }
             fflush(stdout);
-            free(current_cmd);
             continue;
-        } else if (c == 127 || c == '\b') { // Handle backspace
+        } else if (c == 127 || c == '\b') { // Handle backspace (DEL or BS)
             if (position > 0) {
                 position--;
+                // Move cursor back, print space to erase character, move back again
                 printf("\b \b");
                 fflush(stdout);
+            } else {
+                // At beginning of line, just ignore backspace
+                continue;
             }
-        } else {
+        } else if (c >= 32 && c < 127) { // Only accept printable characters
+            // Regular printable character
             if (position >= bufsize - 1) {
                 bufsize += RIPPLE_RL_BUFSIZE;
                 buffer = realloc(buffer, bufsize);
@@ -884,6 +962,7 @@ char *ripple_read_line(void) {
             }
             buffer[position] = c;
             position++;
+            // Manually echo the character since ECHO is disabled
             putchar(c);
             fflush(stdout);
         }
@@ -892,20 +971,33 @@ char *ripple_read_line(void) {
 
 // Main entry point
 int main(void) {
-    // Print welcome message
-    printf("\033[1;36m========================================\033[0m\n");
-    printf("\033[1;36m     ACMShell with AI Integration      \033[0m\n");
-    printf("\033[1;36m========================================\033[0m\n");
-    printf("\033[1;33mFor AI-powered command suggestions:\033[0m\n");
-    printf("  1. \033[1;33mBegin typing a command\033[0m\n");
-    printf("  2. \033[1;33mPress TAB key at any point for AI suggestions\033[0m\n");
-    printf("  3. \033[1;33mContinue typing or select a suggestion\033[0m\n\n");
-    printf("\033[1;33mType 'help' for a list of built-in commands\033[0m\n");
-    printf("\033[1;33mMake sure Ollama is running with the tinyllama model\033[0m\n");
-    printf("\033[1;36m========================================\033[0m\n\n");
+    // Print neon-styled welcome message
+    printf("\033[40m\033[2J\033[H"); // Clear screen and set black background
+    printf("\n");
+    printf("\033[1;35m╔═══════════════════════════════════════════════════════════════╗\033[0m\n");
+    printf("\033[1;35m║\033[0m                                                               \033[1;35m║\033[0m\n");
+    printf("\033[1;35m║\033[0m        \033[1;96m⚡ AI-POWERED CUSTOM SHELL v1.0 ⚡\033[0m              \033[1;35m║\033[0m\n");
+    printf("\033[1;35m║\033[0m           \033[1;93m『 Neon Command Interface 』\033[0m                \033[1;35m║\033[0m\n");
+    printf("\033[1;35m║\033[0m                                                               \033[1;35m║\033[0m\n");
+    printf("\033[1;35m╚═══════════════════════════════════════════════════════════════╝\033[0m\n\n");
+    
+    printf("\033[1;96m┌─ \033[1;92mQuick Start Guide\033[0m\033[1;96m ─────────────────────────────────────────┐\033[0m\n");
+    printf("\033[1;96m│\033[0m                                                               \033[1;96m│\033[0m\n");
+    printf("\033[1;96m│\033[0m  \033[1;93m▸\033[0m Type any command and press \033[1;95mTAB\033[0m for AI suggestions       \033[1;96m│\033[0m\n");
+    printf("\033[1;96m│\033[0m  \033[1;93m▸\033[0m Try: \033[1;92mhelp\033[0m, \033[1;92mversion\033[0m, \033[1;92mcalc\033[0m, \033[1;92mls\033[0m                       \033[1;96m│\033[0m\n");
+    printf("\033[1;96m│\033[0m  \033[1;93m▸\033[0m Partial commands auto-complete: \033[1;92mver\033[0m → \033[1;92mversion\033[0m        \033[1;96m│\033[0m\n");
+    printf("\033[1;96m│\033[0m  \033[1;93m▸\033[0m External commands get smart help: \033[1;92mgcc\033[0m, \033[1;92mgit\033[0m        \033[1;96m│\033[0m\n");
+    printf("\033[1;96m│\033[0m                                                               \033[1;96m│\033[0m\n");
+    printf("\033[1;96m└───────────────────────────────────────────────────────────────┘\033[0m\n\n");
+    
+    printf("\033[1;90m💡 Tip: Make sure Ollama is running (tinyllama model)\033[0m\n\n");
     
     // Run command loop
     ripple_loop();
+    
+    printf("\n\033[1;35m╔═══════════════════════════════════════════════════════════════╗\033[0m\n");
+    printf("\033[1;35m║\033[0m           \033[1;96mThank you for using Neon Shell!\033[0m              \033[1;35m║\033[0m\n");
+    printf("\033[1;35m╚═══════════════════════════════════════════════════════════════╝\033[0m\n\n");
     
     return EXIT_SUCCESS;
 }

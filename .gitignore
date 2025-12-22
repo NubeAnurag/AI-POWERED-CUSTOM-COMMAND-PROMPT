@@ -1,1 +1,17 @@
-*.sh
+# Build artifacts
+*.o
+*.a
+*.dylib
+*.so
+*.dSYM/
+shell2_complete_ai
+test_ollama
+test_ollama_direct
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
